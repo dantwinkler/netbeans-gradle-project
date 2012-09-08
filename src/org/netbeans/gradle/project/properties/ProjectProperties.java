@@ -1,44 +1,24 @@
 package org.netbeans.gradle.project.properties;
 
 import java.nio.charset.Charset;
-import java.util.regex.Pattern;
+import java.util.Collection;
+import java.util.List;
 import org.netbeans.api.java.platform.JavaPlatform;
-import org.openide.modules.SpecificationVersion;
 
-public final class ProjectProperties {
-    public static final Charset DEFAULT_SOURCE_ENCODING = Charset.forName("UTF-8");
+public interface ProjectProperties {
+    // When adding new properties, don't forget to update:
+    //   - PropertiesSnapshot: Add a field for the new property.
+    //   - XmlPropertiesPersister.load: Do the same as with other properties.
+    //   - AbstractProjectProperties.getAllProperties: Return the new property as well.
+    //   - PropertiesSnapshot's public constructor: Check the newly added property as well
+    //   - Implement saving and loading in XmlPropertyFormat
+    //
+    //   Other places need to be updated will not compile.
 
-    private final MutableProperty<String> sourceLevel;
-    private final MutableProperty<JavaPlatform> platform;
-    private final MutableProperty<Charset> sourceEncoding;
+    public MutableProperty<String> getSourceLevel();
+    public MutableProperty<JavaPlatform> getPlatform();
+    public MutableProperty<Charset> getSourceEncoding();
+    public MutableProperty<List<PredefinedTask>> getCommonTasks();
 
-    public ProjectProperties() {
-        JavaPlatform defaultPlatform = JavaPlatform.getDefault();
-        this.sourceLevel = new DefaultMutableProperty<String>(getSourceLevelFromPlatform(defaultPlatform), false);
-        this.platform = new DefaultMutableProperty<JavaPlatform>(defaultPlatform, false);
-        this.sourceEncoding = new DefaultMutableProperty<Charset>(DEFAULT_SOURCE_ENCODING, false);
-    }
-
-    public static String getSourceLevelFromPlatform(JavaPlatform platform) {
-        SpecificationVersion version = platform.getSpecification().getVersion();
-        String[] versionParts = version.toString().split(Pattern.quote("."));
-        if (versionParts.length < 2) {
-            return "1.7";
-        }
-        else {
-            return versionParts[0] + "." + versionParts[1];
-        }
-    }
-
-    public MutableProperty<String> getSourceLevel() {
-        return sourceLevel;
-    }
-
-    public MutableProperty<JavaPlatform> getPlatform() {
-        return platform;
-    }
-
-    public MutableProperty<Charset> getSourceEncoding() {
-        return sourceEncoding;
-    }
+    public Collection<MutableProperty<?>> getAllProperties();
 }
