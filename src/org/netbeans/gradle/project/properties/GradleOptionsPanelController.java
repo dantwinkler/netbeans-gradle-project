@@ -1,11 +1,8 @@
 package org.netbeans.gradle.project.properties;
 
 import java.beans.PropertyChangeListener;
-import java.io.File;
 import javax.swing.JComponent;
 import org.netbeans.spi.options.OptionsPanelController;
-import org.openide.filesystems.FileObject;
-import org.openide.filesystems.FileUtil;
 import org.openide.util.HelpCtx;
 import org.openide.util.Lookup;
 
@@ -15,13 +12,13 @@ import org.openide.util.Lookup;
         keywords = "#AdvancedOption_Keywords_Gradle",
         keywordsCategory = "Advanced/Gradle")
 public final class GradleOptionsPanelController extends OptionsPanelController {
-    private GradleSettingsPanel panel;
+    private GradleSettingsPanel settingsPanel;
 
     private GradleSettingsPanel getPanel() {
-        if (panel == null) {
-            panel = new GradleSettingsPanel();
+        if (settingsPanel == null) {
+            settingsPanel = new GradleSettingsPanel();
         }
-        return panel;
+        return settingsPanel;
     }
 
     @Override
@@ -29,20 +26,14 @@ public final class GradleOptionsPanelController extends OptionsPanelController {
         getPanel().updateSettings();
     }
 
-    private static FileObject strToFileObject(String strPath) {
-        if (strPath.isEmpty()) {
-            return null;
-        }
-
-        File file = new File(strPath);
-        file = FileUtil.normalizeFile(file);
-        return FileUtil.toFileObject(file);
-    }
-
     @Override
     public void applyChanges() {
-        FileObject gradleHomeObj = strToFileObject(getPanel().getGradleHome());
-        GlobalGradleSettings.getGradleHome().setValue(gradleHomeObj);
+        GradleSettingsPanel panel = getPanel();
+
+        GlobalGradleSettings.getGradleHome().setValueFromString(panel.getGradleHome());
+        GlobalGradleSettings.getGradleJvmArgs().setValueFromString(panel.getGradleJvmArgs());
+        GlobalGradleSettings.getGradleJdk().setValue(panel.getJdk());
+        GlobalGradleSettings.getSkipTests().setValue(panel.isSkipTests());
     }
 
     @Override

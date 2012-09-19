@@ -1,10 +1,9 @@
 package org.netbeans.gradle.project.view;
 
 import java.awt.event.KeyEvent;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.StringTokenizer;
 import javax.swing.JTextArea;
+import org.netbeans.gradle.project.StringUtils;
+import org.netbeans.gradle.project.properties.PredefinedTask;
 
 @SuppressWarnings("serial") // Don't care about serialization
 public class CustomActionPanel extends javax.swing.JPanel {
@@ -12,17 +11,28 @@ public class CustomActionPanel extends javax.swing.JPanel {
         initComponents();
     }
 
-    private String[] splitText(String text, String delimiters) {
-        StringTokenizer tokenizer = new StringTokenizer(text, delimiters);
-        List<String> result = new LinkedList<String>();
-        while (tokenizer.hasMoreTokens()) {
-            String token = tokenizer.nextToken().trim();
-            if (!token.isEmpty()) {
-                result.add(token);
-            }
-        }
+    public void updatePanel(PredefinedTask task) {
+        StringBuilder tasks = new StringBuilder(1024);
 
-        return result.toArray(new String[result.size()]);
+        for (PredefinedTask.Name name: task.getTaskNames()) {
+            tasks.append(name.getName());
+            tasks.append(' ');
+        }
+        jTasksEdit.setText(tasks.toString());
+
+        StringBuilder arguments = new StringBuilder(1024);
+        for (String arg: task.getArguments()) {
+            arguments.append(arg);
+            arguments.append('\n');
+        }
+        jArgsTextArea.setText(arguments.toString());
+
+        StringBuilder jvmArguments = new StringBuilder(1024);
+        for (String arg: task.getJvmArguments()) {
+            jvmArguments.append(arg);
+            jvmArguments.append('\n');
+        }
+        jJvmArgsTextArea.setText(jvmArguments.toString());
     }
 
     public String[] getTasks() {
@@ -31,7 +41,7 @@ public class CustomActionPanel extends javax.swing.JPanel {
             return new String[0];
         }
 
-        return splitText(text, " \t\n\r\f");
+        return StringUtils.splitBySpaces(text);
     }
 
     public String[] getArguments() {
@@ -40,7 +50,7 @@ public class CustomActionPanel extends javax.swing.JPanel {
             return new String[0];
         }
 
-        return splitText(text, "\n\r");
+        return StringUtils.splitLines(text);
     }
 
     public String[] getJvmArguments() {
@@ -49,7 +59,7 @@ public class CustomActionPanel extends javax.swing.JPanel {
             return new String[0];
         }
 
-        return splitText(text, "\n\r");
+        return StringUtils.splitLines(text);
     }
 
     private void traverseWithTab(JTextArea textArea, KeyEvent event) {
@@ -116,7 +126,7 @@ public class CustomActionPanel extends javax.swing.JPanel {
             .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
                 .addContainerGap()
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addComponent(jScrollPane2, javax.swing.GroupLayout.DEFAULT_SIZE, 472, Short.MAX_VALUE)
+                    .addComponent(jScrollPane2, javax.swing.GroupLayout.DEFAULT_SIZE, 469, Short.MAX_VALUE)
                     .addComponent(jScrollPane1)
                     .addComponent(jTasksEdit, javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(javax.swing.GroupLayout.Alignment.LEADING, layout.createSequentialGroup()
@@ -141,8 +151,8 @@ public class CustomActionPanel extends javax.swing.JPanel {
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                 .addComponent(jJvmArgsCaption)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(jScrollPane2, javax.swing.GroupLayout.DEFAULT_SIZE, 106, Short.MAX_VALUE)
-                .addContainerGap())
+                .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 133, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
     }// </editor-fold>//GEN-END:initComponents
 

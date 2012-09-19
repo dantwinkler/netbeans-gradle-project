@@ -1,5 +1,6 @@
 package org.netbeans.gradle.project.properties;
 
+import java.awt.Dialog;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
@@ -8,15 +9,20 @@ import java.util.logging.Logger;
 import javax.swing.DefaultComboBoxModel;
 import org.netbeans.api.java.platform.JavaPlatform;
 import org.netbeans.api.java.platform.JavaPlatformManager;
+import org.netbeans.gradle.project.NbStrings;
+import org.openide.DialogDescriptor;
+import org.openide.DialogDisplayer;
 import org.openide.modules.SpecificationVersion;
 
 @SuppressWarnings("serial") // don't care
 public class ProjectPropertiesPanel extends javax.swing.JPanel {
     private static final Logger LOGGER = Logger.getLogger(ProjectPropertiesPanel.class.getName());
+    private ProjectProperties currentProperties;
 
     public ProjectPropertiesPanel() {
         initComponents();
 
+        currentProperties = null;
         JavaPlatform[] platforms = JavaPlatformManager.getDefault().getInstalledPlatforms();
         PlatformComboItem[] comboItems = new PlatformComboItem[platforms.length];
         for (int i = 0; i < platforms.length; i++) {
@@ -27,6 +33,8 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
     }
 
     public void initFromProperties(ProjectProperties properties) {
+        currentProperties = properties;
+
         JavaPlatform currentPlatform = properties.getPlatform().getValue();
         jPlatformCombo.setSelectedItem(new PlatformComboItem(currentPlatform));
 
@@ -46,9 +54,9 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
             Charset newEncoding = Charset.forName(charsetName);
             properties.getSourceEncoding().setValue(newEncoding);
         } catch (IllegalCharsetNameException ex) {
-            LOGGER.log(Level.WARNING, "Illegal character set: " + charsetName, ex);
+            LOGGER.log(Level.INFO, "Illegal character set: " + charsetName, ex);
         } catch (UnsupportedCharsetException ex) {
-            LOGGER.log(Level.WARNING, "Unsupported character set: " + charsetName, ex);
+            LOGGER.log(Level.INFO, "Unsupported character set: " + charsetName, ex);
         }
 
         String sourceLevel = (String)jSourceLevelCombo.getSelectedItem();
@@ -66,9 +74,9 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
         try {
             return Charset.forName(jSourceEncoding.getText().trim());
         } catch (IllegalCharsetNameException ex) {
-            return ProjectProperties.DEFAULT_SOURCE_ENCODING;
+            return MemProjectProperties.DEFAULT_SOURCE_ENCODING;
         } catch (UnsupportedCharsetException ex) {
-            return ProjectProperties.DEFAULT_SOURCE_ENCODING;
+            return MemProjectProperties.DEFAULT_SOURCE_ENCODING;
         }
     }
 
@@ -126,6 +134,7 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
         jPlatformCombo = new javax.swing.JComboBox();
         jSourceLevelCaption = new javax.swing.JLabel();
         jSourceLevelCombo = new javax.swing.JComboBox();
+        jManageTasksButton = new javax.swing.JButton();
 
         org.openide.awt.Mnemonics.setLocalizedText(jSourceEncodingCaption, org.openide.util.NbBundle.getMessage(ProjectPropertiesPanel.class, "ProjectPropertiesPanel.jSourceEncodingCaption.text")); // NOI18N
 
@@ -136,6 +145,13 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
         org.openide.awt.Mnemonics.setLocalizedText(jSourceLevelCaption, org.openide.util.NbBundle.getMessage(ProjectPropertiesPanel.class, "ProjectPropertiesPanel.jSourceLevelCaption.text")); // NOI18N
 
         jSourceLevelCombo.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "1.3", "1.4", "1.5", "1.6", "1.7", "1.8" }));
+
+        org.openide.awt.Mnemonics.setLocalizedText(jManageTasksButton, org.openide.util.NbBundle.getMessage(ProjectPropertiesPanel.class, "ProjectPropertiesPanel.jManageTasksButton.text")); // NOI18N
+        jManageTasksButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jManageTasksButtonActionPerformed(evt);
+            }
+        });
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(this);
         this.setLayout(layout);
@@ -152,13 +168,16 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
                             .addComponent(jPlatformCaption)
                             .addComponent(jSourceLevelCaption))
                         .addGap(0, 303, Short.MAX_VALUE))
-                    .addComponent(jSourceLevelCombo, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addComponent(jSourceLevelCombo, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addGap(0, 0, Short.MAX_VALUE)
+                        .addComponent(jManageTasksButton)))
                 .addContainerGap())
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
-                .addContainerGap()
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                 .addComponent(jSourceEncodingCaption)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(jSourceEncoding, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
@@ -170,10 +189,40 @@ public class ProjectPropertiesPanel extends javax.swing.JPanel {
                 .addComponent(jSourceLevelCaption)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(jSourceLevelCombo, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(jManageTasksButton))
         );
     }// </editor-fold>//GEN-END:initComponents
+
+    private void jManageTasksButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jManageTasksButtonActionPerformed
+        if (currentProperties == null) {
+            LOGGER.warning("Project properties were not set.");
+            return;
+        }
+
+        ManageTasksPanel panel = new ManageTasksPanel();
+        panel.initSettings(currentProperties);
+
+        DialogDescriptor dlgDescriptor = new DialogDescriptor(
+                panel,
+                NbStrings.getManageTasksDlgTitle(),
+                true,
+                new Object[]{DialogDescriptor.OK_OPTION, DialogDescriptor.CANCEL_OPTION},
+                DialogDescriptor.OK_OPTION,
+                DialogDescriptor.BOTTOM_ALIGN,
+                null,
+                null);
+        Dialog dlg = DialogDisplayer.getDefault().createDialog(dlgDescriptor);
+        dlg.pack();
+        dlg.setVisible(true);
+
+        if (DialogDescriptor.OK_OPTION == dlgDescriptor.getValue()) {
+            panel.saveTasks(currentProperties);
+        }
+    }//GEN-LAST:event_jManageTasksButtonActionPerformed
+
     // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JButton jManageTasksButton;
     private javax.swing.JLabel jPlatformCaption;
     private javax.swing.JComboBox jPlatformCombo;
     private javax.swing.JTextField jSourceEncoding;

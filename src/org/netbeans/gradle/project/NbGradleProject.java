@@ -1,9 +1,9 @@
 package org.netbeans.gradle.project;
 
-import org.netbeans.gradle.project.query.GradleAnnotationProcessingQuery;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,10 +19,10 @@ import org.netbeans.api.project.Project;
 import org.netbeans.gradle.project.model.GradleModelLoader;
 import org.netbeans.gradle.project.model.ModelRetrievedListener;
 import org.netbeans.gradle.project.model.NbGradleModel;
-import org.netbeans.gradle.project.persistent.PropertiesPersister;
-import org.netbeans.gradle.project.persistent.XmlPropertiesPersister;
 import org.netbeans.gradle.project.properties.GradleCustomizer;
 import org.netbeans.gradle.project.properties.ProjectProperties;
+import org.netbeans.gradle.project.properties.ProjectPropertiesProxy;
+import org.netbeans.gradle.project.query.GradleAnnotationProcessingQuery;
 import org.netbeans.gradle.project.query.GradleBinaryForSourceQuery;
 import org.netbeans.gradle.project.query.GradleCacheBinaryForSourceQuery;
 import org.netbeans.gradle.project.query.GradleCacheSourceForBinaryQuery;
@@ -58,25 +58,39 @@ public final class NbGradleProject implements Project {
     private final AtomicBoolean hasModelBeenLoaded;
     private final AtomicReference<NbGradleModel> currentModelRef;
     private final ProjectProperties properties;
-    private final PropertiesPersister propertiesPersister;
+    private final ProjectInfoManager projectInfoManager;
+
+    private final AtomicReference<ProjectInfoRef> loadErrorRef;
 
     private volatile boolean loadedAtLeastOnce;
-    private boolean saveOnLoad; // access from the EDT
 
     public NbGradleProject(FileObject projectDir, ProjectState state) throws IOException {
         this.projectDir = projectDir;
         this.state = state;
         this.lookupRef = new AtomicReference<Lookup>(null);
-        this.properties = new ProjectProperties();
-        this.propertiesPersister = new XmlPropertiesPersister(this);
+        this.properties = new ProjectPropertiesProxy(this);
+        this.projectInfoManager = new ProjectInfoManager();
 
         this.hasModelBeenLoaded = new AtomicBoolean(false);
+        this.loadErrorRef = new AtomicReference<ProjectInfoRef>(null);
         this.modelChanges = new ChangeSupport(this);
         this.currentModelRef = new AtomicReference<NbGradleModel>(GradleModelLoader.createEmptyModel(projectDir));
 
         this.cpProvider = new GradleClassPathProvider(this);
         this.loadedAtLeastOnce = false;
-        this.saveOnLoad = false;
+    }
+
+    private ProjectInfoRef getLoadErrorRef() {
+        ProjectInfoRef result = loadErrorRef.get();
+        if (result == null) {
+            loadErrorRef.compareAndSet(null, getProjectInfoManager().createInfoRef());
+            result = loadErrorRef.get();
+        }
+        return result;
+    }
+
+    public ProjectInfoManager getProjectInfoManager() {
+        return projectInfoManager;
     }
 
     public void addModelChangeListener(ChangeListener listener) {
@@ -87,9 +101,13 @@ public final class NbGradleProject implements Project {
         modelChanges.removeChangeListener(listener);
     }
 
+    public NbGradleModel getAvailableModel() {
+        return currentModelRef.get();
+    }
+
     public NbGradleModel getCurrentModel() {
         loadProject(true, true);
-        return currentModelRef.get();
+        return getAvailableModel();
     }
 
     public void reloadProject() {
@@ -98,19 +116,6 @@ public final class NbGradleProject implements Project {
 
     private void reloadProject(boolean mayUseCache) {
         loadProject(false, mayUseCache);
-    }
-
-    public void saveProperties() {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            throw new IllegalStateException("This method may only be called from the EDT.");
-        }
-
-        if (loadedAtLeastOnce) {
-            propertiesPersister.save(properties);
-        }
-        else {
-            saveOnLoad = true;
-        }
     }
 
     public boolean hasLoadedProject() {
@@ -122,13 +127,6 @@ public final class NbGradleProject implements Project {
 
         try {
             loadedAtLeastOnce = true;
-            if (saveOnLoad) {
-                saveOnLoad = false;
-                propertiesPersister.save(properties);
-            }
-            else {
-                propertiesPersister.load(properties);
-            }
             modelChanges.fireChange();
         } finally {
             GradleCacheSourceForBinaryQuery.notifyCacheChange();
@@ -366,7 +364,14 @@ public final class NbGradleProject implements Project {
             }
 
             if (error != null) {
-                LOGGER.log(Level.WARNING, "Error while loading the project model.", error);
+                ProjectInfo.Entry entry = new ProjectInfo.Entry(
+                        ProjectInfo.Kind.ERROR,
+                        NbStrings.getErrorLoadingProject(error));
+                getLoadErrorRef().setInfo(new ProjectInfo(Collections.singleton(entry)));
+                LOGGER.log(Level.INFO, "Error while loading the project model.", error);
+            }
+            else {
+                getLoadErrorRef().setInfo(null);
             }
 
             if (hasChanged) {

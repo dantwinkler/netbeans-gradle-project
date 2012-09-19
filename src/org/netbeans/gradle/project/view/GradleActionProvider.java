@@ -1,14 +1,21 @@
 package org.netbeans.gradle.project.view;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.netbeans.gradle.project.GradleTasks;
 import org.netbeans.gradle.project.NbGradleProject;
 import org.netbeans.gradle.project.model.NbGradleModule;
 import org.netbeans.gradle.project.model.NbSourceType;
+import org.netbeans.gradle.project.properties.GlobalGradleSettings;
+import org.netbeans.gradle.project.tasks.AttacherListener;
+import org.netbeans.gradle.project.tasks.DebugTextListener;
+import org.netbeans.gradle.project.tasks.GradleTaskDef;
+import org.netbeans.gradle.project.tasks.GradleTasks;
+import org.netbeans.gradle.project.tasks.TaskOutputListener;
 import org.netbeans.spi.project.ActionProvider;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
@@ -42,6 +49,10 @@ public final class GradleActionProvider implements ActionProvider {
         this.project = project;
     }
 
+    private TaskOutputListener debugeeListener(boolean test) {
+        return new DebugTextListener(new AttacherListener(project, test));
+    }
+
     @Override
     public String[] getSupportedActions() {
         return SUPPORTED_ACTIONS.clone();
@@ -71,33 +82,51 @@ public final class GradleActionProvider implements ActionProvider {
         return files;
     }
 
-    private static String[] toQualifiedTaskName(NbGradleProject project, String... tasks) {
-        String qualifier = project.getCurrentModel().getMainModule().getUniqueName() + ":";
+    private static List<String> toQualifiedTaskName(NbGradleProject project, String... tasks) {
+        String qualifier = project.getAvailableModel().getMainModule().getUniqueName() + ":";
 
-        String[] qualified = new String[tasks.length];
-        for (int i = 0; i < tasks.length; i++) {
-            qualified[i] = qualifier + tasks[i];
+        List<String> qualified = new ArrayList<String>(tasks.length);
+        for (String task: tasks) {
+            qualified.add(qualifier + task);
         }
         return qualified;
     }
 
-    private static Runnable createProjectTask(NbGradleProject project, String... tasks) {
-        String[] qualified = toQualifiedTaskName(project, tasks);
-        return GradleTasks.createAsyncGradleTask(project, qualified);
+    private Runnable createProjectTask(
+            boolean listenForDebugee,
+            boolean test,
+            boolean addSkipTestIfNeeded,
+            String... tasks) {
+        List<String> qualified = toQualifiedTaskName(project, tasks);
+        GradleTaskDef.Builder builder = new GradleTaskDef.Builder(qualified);
+        if (listenForDebugee) {
+            builder.setStdOutListener(debugeeListener(test));
+        }
+        if (addSkipTestIfNeeded && GlobalGradleSettings.getSkipTests().getValue()) {
+            builder.setArguments(Arrays.asList("-x", "test"));
+        }
+
+        return GradleTasks.createAsyncGradleTask(project, builder.create());
+    }
+
+    private Runnable createProjectTask(
+            boolean addSkipTestIfNeeded,
+            String... tasks) {
+        return createProjectTask(false, false, addSkipTestIfNeeded, tasks);
     }
 
     private Runnable createAction(String command, Lookup context) {
         if (COMMAND_BUILD.equals(command)) {
-            return createProjectTask(project, "build");
+            return createProjectTask(true, "build");
         }
         else if (COMMAND_TEST.equals(command)) {
-            return createProjectTask(project, "cleanTest", "test");
+            return createProjectTask(false, "cleanTest", "test");
         }
         else if (COMMAND_CLEAN.equals(command)) {
-            return createProjectTask(project, "clean");
+            return createProjectTask(false, "clean");
         }
         else if (COMMAND_REBUILD.equals(command)) {
-            return createProjectTask(project, "clean", "build");
+            return createProjectTask(true, "clean", "build");
         }
         else if (COMMAND_RELOAD.equals(command)) {
             return new Runnable() {
@@ -108,13 +137,13 @@ public final class GradleActionProvider implements ActionProvider {
             };
         }
         else if (COMMAND_RUN.equals(command)) {
-            return createProjectTask(project, "run");
+            return createProjectTask(true, "run");
         }
         else if (COMMAND_DEBUG.equals(command)) {
-            return createProjectTask(project, "debug");
+            return createProjectTask(true, false, true, "debug");
         }
         else if (COMMAND_JAVADOC.equals(command)) {
-            return createProjectTask(project, "javadoc");
+            return createProjectTask(false, "javadoc");
         }
         else if (COMMAND_TEST_SINGLE.equals(command) || COMMAND_DEBUG_TEST_SINGLE.equals(command)) {
             List<FileObject> files = getFilesOfContext(context);
@@ -146,7 +175,7 @@ public final class GradleActionProvider implements ActionProvider {
             GradleTasks.TASK_EXECUTOR.execute(new Runnable() {
                 @Override
                 public void run() {
-                    NbGradleModule mainModule = project.getCurrentModel().getMainModule();
+                    NbGradleModule mainModule = project.getAvailableModel().getMainModule();
 
                     List<FileObject> sources = new LinkedList<FileObject>();
                     sources.addAll(mainModule.getSources(NbSourceType.SOURCE).getFileObjects());
@@ -169,10 +198,17 @@ public final class GradleActionProvider implements ActionProvider {
                                 ? new String[]{testArg, "-Dtest.debug"}
                                 : new String[]{testArg};
 
-                        Runnable task = GradleTasks.createAsyncGradleTask(
-                                project,
-                                toQualifiedTaskName(project, "cleanTest", "test"),
-                                args);
+                        List<String> qualifiedTaskNames
+                                = toQualifiedTaskName(project, "cleanTest", "test");
+
+                        GradleTaskDef.Builder builder = new GradleTaskDef.Builder(qualifiedTaskNames);
+                        builder.setArguments(Arrays.asList(args));
+                        if (debug) {
+                            builder.setStdOutListener(debugeeListener(true));
+                        }
+
+                        Runnable task;
+                        task = GradleTasks.createAsyncGradleTask(project, builder.create());
                         task.run();
                     }
                     else {

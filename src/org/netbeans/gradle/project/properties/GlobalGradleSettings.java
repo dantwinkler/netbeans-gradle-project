@@ -1,24 +1,181 @@
 package org.netbeans.gradle.project.properties;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.prefs.PreferenceChangeEvent;
 import java.util.prefs.PreferenceChangeListener;
 import java.util.prefs.Preferences;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import org.netbeans.api.java.platform.JavaPlatform;
+import org.netbeans.api.java.platform.JavaPlatformManager;
+import org.netbeans.gradle.project.StringUtils;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
 import org.openide.util.NbPreferences;
 
 public final class GlobalGradleSettings {
-    private static final MutableProperty<FileObject> GRADLE_HOME;
+    private static final Logger LOGGER = Logger.getLogger(GlobalGradleSettings.class.getName());
+
+    private static final StringBasedProperty<FileObject> GRADLE_HOME;
+    private static final StringBasedProperty<List<String>> GRADLE_JVM_ARGS;
+    private static final StringBasedProperty<JavaPlatform> GRADLE_JDK;
+    private static final StringBasedProperty<Boolean> SKIP_TESTS;
 
     static {
         GRADLE_HOME = new GlobalProperty<FileObject>("gradle-home", GradleHomeConverter.INSTANCE);
+        GRADLE_JVM_ARGS = new GlobalProperty<List<String>>("gradle-jvm-args", StringToStringListConverter.INSTANCE);
+        GRADLE_JDK = new GlobalProperty<JavaPlatform>("gradle-jdk", JavaPlaformConverter.INSTANCE);
+        SKIP_TESTS = new GlobalProperty<Boolean>("skip-tests", new BooleanConverter(false));
     }
 
-    public static MutableProperty<FileObject> getGradleHome() {
+    public static StringBasedProperty<FileObject> getGradleHome() {
         return GRADLE_HOME;
+    }
+
+    public static StringBasedProperty<List<String>> getGradleJvmArgs() {
+        return GRADLE_JVM_ARGS;
+    }
+
+    public static StringBasedProperty<JavaPlatform> getGradleJdk() {
+        return GRADLE_JDK;
+    }
+
+    public static StringBasedProperty<Boolean> getSkipTests() {
+        return SKIP_TESTS;
+    }
+
+    public static FileObject getCurrentGradleJdkHome() {
+        JavaPlatform platform = GRADLE_JDK.getValue();
+        if (platform == null) {
+            return null;
+        }
+
+        Collection<FileObject> installFolders = platform.getInstallFolders();
+        int numberOfFolder = installFolders.size();
+        if (numberOfFolder == 0) {
+            LOGGER.log(Level.WARNING, "Selected platform contains no installation folders: {0}", platform.getDisplayName());
+            return null;
+        }
+
+        if (numberOfFolder > 1) {
+            LOGGER.log(Level.WARNING, "Selected platform contains multiple installation folders: {0}", platform.getDisplayName());
+        }
+
+        return installFolders.iterator().next();
+    }
+
+    private enum StringToStringListConverter implements ValueConverter<List<String>> {
+        INSTANCE;
+
+        @Override
+        public List<String> toValue(String strValue) {
+            if (strValue == null || strValue.isEmpty()) {
+                return null;
+            }
+
+            return Collections.unmodifiableList(Arrays.asList(StringUtils.splitLines(strValue)));
+        }
+
+        @Override
+        public String toString(List<String> value) {
+            if (value == null || value.isEmpty()) {
+                return null;
+            }
+
+            int length = value.size() - 1;
+            for (String line: value) {
+                length += line.length();
+            }
+
+            StringBuilder result = new StringBuilder(length);
+            Iterator<String> valueItr = value.iterator();
+            // valueItr.next() should succeed since the list is not empty.
+            result.append(valueItr.next());
+
+            while (!valueItr.hasNext()) {
+                result.append('\n');
+                result.append(valueItr.next());
+            }
+            return result.toString();
+        }
+    }
+
+    private static class BooleanConverter implements ValueConverter<Boolean> {
+        private static String TRUE_STR = Boolean.TRUE.toString();
+        private static String FALSE_STR = Boolean.FALSE.toString();
+
+        private final Boolean defaultValue;
+
+        public BooleanConverter(Boolean defaultValue) {
+            this.defaultValue = defaultValue;
+        }
+
+        @Override
+        public Boolean toValue(String strValue) {
+            if (strValue == null || strValue.isEmpty()) {
+                return defaultValue;
+            }
+
+            if (TRUE_STR.equals(strValue)) return true;
+            if (FALSE_STR.equals(strValue)) return false;
+            return defaultValue;
+        }
+
+        @Override
+        public String toString(Boolean value) {
+            if (value != null && value.equals(defaultValue)) {
+                return null;
+            }
+            // This check only matters in case value and defaultValue are both nulls.
+            if (value == defaultValue) {
+                return null;
+            }
+
+            return value != null ? value.toString() : null;
+        }
+    }
+
+    private enum JavaPlaformConverter implements ValueConverter<JavaPlatform> {
+        INSTANCE;
+
+        @Override
+        public JavaPlatform toValue(String strValue) {
+            if (strValue == null || strValue.isEmpty()) {
+                return JavaPlatform.getDefault();
+            }
+
+            JavaPlatform[] platforms = JavaPlatformManager.getDefault().getInstalledPlatforms();
+            for (JavaPlatform platform: platforms) {
+                if (strValue.equals(toString(platform))) {
+                    return platform;
+                }
+            }
+            return JavaPlatform.getDefault();
+        }
+
+        @Override
+        public String toString(JavaPlatform value) {
+            if (value == null) {
+                return null;
+            }
+
+            StringBuilder result = new StringBuilder(1024);
+            for (FileObject installFolder: value.getInstallFolders()) {
+                String path = installFolder.getPath();
+                if (result.length() > 0) {
+                    result.append(";");
+                }
+                result.append(path);
+            }
+            return result.toString();
+        }
     }
 
     private enum GradleHomeConverter implements ValueConverter<FileObject> {
@@ -61,7 +218,7 @@ public final class GlobalGradleSettings {
         public String toString(ValueType value);
     }
 
-    private static class GlobalProperty<ValueType> implements MutableProperty<ValueType> {
+    private static class GlobalProperty<ValueType> implements StringBasedProperty<ValueType> {
         private final String settingsName;
         private final ValueConverter<ValueType> converter;
 
@@ -81,17 +238,12 @@ public final class GlobalGradleSettings {
         @Override
         public void setValue(ValueType value) {
             String strValue = converter.toString(value);
-            if (strValue != null) {
-                getPreferences().put(settingsName, strValue);
-            }
-            else {
-                getPreferences().remove(settingsName);
-            }
+            setValueFromString(strValue);
         }
 
         @Override
         public ValueType getValue() {
-            return converter.toValue(getPreferences().get(settingsName, null));
+            return converter.toValue(getValueAsString());
         }
 
         @Override
@@ -108,6 +260,21 @@ public final class GlobalGradleSettings {
             // hope for the best as there is nothing else we can do.
             getPreferences().removePreferenceChangeListener(
                     new ChangeListenerWrapper(settingsName, listener));
+        }
+
+        @Override
+        public void setValueFromString(String strValue) {
+            if (strValue != null) {
+                getPreferences().put(settingsName, strValue);
+            }
+            else {
+                getPreferences().remove(settingsName);
+            }
+        }
+
+        @Override
+        public String getValueAsString() {
+            return getPreferences().get(settingsName, null);
         }
     }
 

@@ -1,7 +1,7 @@
 package org.netbeans.gradle.project;
 
-import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import org.netbeans.gradle.project.model.NbGradleModule;
 import org.openide.util.NbBundle;
 
@@ -38,18 +38,12 @@ public final class NbStrings {
         return NbBundle.getMessage(NbStrings.class, "MSG_ExecutingTask", command);
     }
 
-    private static String formatArgumentsOfMessage(String... arguments) {
-        return Arrays.toString(arguments);
+    public static String getTaskArgumentsMessage(List<String> arguments) {
+        return NbBundle.getMessage(NbStrings.class, "MSG_TaskArguments", arguments);
     }
 
-    public static String getTaskArgumentsMessage(String... arguments) {
-        String formatted = formatArgumentsOfMessage(arguments);
-        return NbBundle.getMessage(NbStrings.class, "MSG_TaskArguments", formatted);
-    }
-
-    public static String getTaskJvmArgumentsMessage(String... arguments) {
-        String formatted = formatArgumentsOfMessage(arguments);
-        return NbBundle.getMessage(NbStrings.class, "MSG_TaskJvmArguments", formatted);
+    public static String getTaskJvmArgumentsMessage(List<String> arguments) {
+        return NbBundle.getMessage(NbStrings.class, "MSG_TaskJvmArguments", arguments);
     }
 
     public static String getDependenciesNodeCaption() {
@@ -127,8 +121,58 @@ public final class NbStrings {
         return NbBundle.getMessage(NbStrings.class, "LBL_CustomTaskTitle");
     }
 
+    public static String getManageTasksDlgTitle() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_ManageTasksTitle");
+    }
+
+    public static String getAddNewTaskDlgTitle() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_AddNewTaskTitle");
+    }
+
     public static String getProjectPropertiesDlgTitle(String projectName) {
         return NbBundle.getMessage(NbStrings.class, "LBL_ProjectPropertiesTitle", projectName);
+    }
+
+    public static String getInvalidClassPathEntry(String entryName) {
+        return NbBundle.getMessage(NbStrings.class, "MSG_InvalidClassPathEntry", entryName);
+    }
+
+    public static String getErrorCaption() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_Error");
+    }
+
+    public static String getWarningCaption() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_Warning");
+    }
+
+    public static String getInfoCaption() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_Info");
+    }
+
+    public static String getExecuteLabel() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_Execute");
+    }
+
+    public static String getSaveAndExecuteLabel() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_SaveAndExecute");
+    }
+
+    public static String getErrorLoadingProject(Throwable ex) {
+        StringBuilder errorText = new StringBuilder(1024);
+        errorText.append(ex.toString());
+
+        Throwable currentError = ex.getCause();
+        while (currentError != null) {
+            errorText.append("<br>");
+            errorText.append(currentError.toString());
+            currentError = currentError.getCause();
+        }
+
+        return NbBundle.getMessage(NbStrings.class, "MSG_ErrorLoadingProject", errorText.toString());
+    }
+
+    public static String getSelectProjectLocationCaption() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_SelectProjectLocation");
     }
 
     private NbStrings() {
