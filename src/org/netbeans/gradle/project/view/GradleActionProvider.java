@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.netbeans.gradle.project.NbGradleProject;
@@ -14,6 +15,7 @@ import org.netbeans.gradle.project.properties.GlobalGradleSettings;
 import org.netbeans.gradle.project.tasks.AttacherListener;
 import org.netbeans.gradle.project.tasks.DebugTextListener;
 import org.netbeans.gradle.project.tasks.GradleTaskDef;
+import org.netbeans.gradle.project.tasks.GradleTaskDef.Builder;
 import org.netbeans.gradle.project.tasks.GradleTasks;
 import org.netbeans.gradle.project.tasks.TaskOutputListener;
 import org.netbeans.spi.project.ActionProvider;
@@ -92,41 +94,50 @@ public final class GradleActionProvider implements ActionProvider {
         return qualified;
     }
 
-    private Runnable createProjectTask(
-            boolean listenForDebugee,
-            boolean test,
-            boolean addSkipTestIfNeeded,
-            String... tasks) {
+    private GradleTaskDef.Builder createProjectTaskBuilder(String... tasks) {
         List<String> qualified = toQualifiedTaskName(project, tasks);
-        GradleTaskDef.Builder builder = new GradleTaskDef.Builder(qualified);
-        if (listenForDebugee) {
-            builder.setStdOutListener(debugeeListener(test));
-        }
+        return new GradleTaskDef.Builder(qualified);
+    }
+
+    private GradleTaskDef.Builder createProjectTaskBuilder(
+            boolean addSkipTestIfNeeded,
+            boolean nonBlocking,
+            String... tasks) {
+
+        GradleTaskDef.Builder builder = createProjectTaskBuilder(tasks);
         if (addSkipTestIfNeeded && GlobalGradleSettings.getSkipTests().getValue()) {
             builder.setArguments(Arrays.asList("-x", "test"));
         }
-
-        return GradleTasks.createAsyncGradleTask(project, builder.create());
+        builder.setNonBlocking(nonBlocking);
+        return builder;
     }
 
     private Runnable createProjectTask(
-            boolean addSkipTestIfNeeded,
+            boolean skipTestIfNeeded,
+            boolean nonBlocking,
             String... tasks) {
-        return createProjectTask(false, false, addSkipTestIfNeeded, tasks);
+        Builder builder = createProjectTaskBuilder(skipTestIfNeeded, nonBlocking, tasks);
+        return GradleTasks.createAsyncGradleTask(project, builder.create());
+    }
+
+    private Runnable createDebugTask(boolean test, String... tasks) {
+        Builder builder = createProjectTaskBuilder(false, false, tasks);
+        builder.setStdOutListener(debugeeListener(test));
+        return GradleTasks.createAsyncGradleTask(project, builder.create());
     }
 
     private Runnable createAction(String command, Lookup context) {
         if (COMMAND_BUILD.equals(command)) {
-            return createProjectTask(true, "build");
+            return createProjectTask(true, true, "build");
         }
         else if (COMMAND_TEST.equals(command)) {
-            return createProjectTask(false, "cleanTest", "test");
+            return createProjectTask(false, true, "cleanTest", "test");
         }
         else if (COMMAND_CLEAN.equals(command)) {
-            return createProjectTask(false, "clean");
+            return createProjectTask(false, true, "clean");
         }
         else if (COMMAND_REBUILD.equals(command)) {
-            return createProjectTask(true, "clean", "build");
+            return createProjectTask(true, true, "clean", "build");
         }
         else if (COMMAND_RELOAD.equals(command)) {
             return new Runnable() {
@@ -137,13 +148,13 @@ public final class GradleActionProvider implements ActionProvider {
             };
         }
         else if (COMMAND_RUN.equals(command)) {
-            return createProjectTask(true, "run");
+            return createProjectTask(true, false, "run");
         }
         else if (COMMAND_DEBUG.equals(command)) {
-            return createProjectTask(true, false, true, "debug");
+            return createDebugTask(false, "debug");
         }
         else if (COMMAND_JAVADOC.equals(command)) {
-            return createProjectTask(false, "javadoc");
+            return createProjectTask(false, true, "javadoc");
         }
         else if (COMMAND_TEST_SINGLE.equals(command) || COMMAND_DEBUG_TEST_SINGLE.equals(command)) {
             List<FileObject> files = getFilesOfContext(context);
@@ -172,9 +183,9 @@ public final class GradleActionProvider implements ActionProvider {
 
         @Override
         public void run() {
-            GradleTasks.TASK_EXECUTOR.execute(new Runnable() {
+            Runnable testTask = GradleTasks.createAsyncGradleTask(project, new Callable<GradleTaskDef>() {
                 @Override
-                public void run() {
+                public GradleTaskDef call() {
                     NbGradleModule mainModule = project.getAvailableModel().getMainModule();
 
                     List<FileObject> sources = new LinkedList<FileObject>();
@@ -207,15 +218,15 @@ public final class GradleActionProvider implements ActionProvider {
                             builder.setStdOutListener(debugeeListener(true));
                         }
 
-                        Runnable task;
-                        task = GradleTasks.createAsyncGradleTask(project, builder.create());
-                        task.run();
+                        return builder.create();
                     }
                     else {
                         LOGGER.log(Level.WARNING, "Failed to find test file to execute: {0}", file);
+                        return null;
                     }
                 }
             });
+            testTask.run();
         }
     }
 }

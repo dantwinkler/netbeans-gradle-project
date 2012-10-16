@@ -14,9 +14,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.SwingUtilities;
@@ -26,6 +23,7 @@ import org.netbeans.api.java.classpath.ClassPath;
 import org.netbeans.api.java.classpath.JavaClassPathConstants;
 import org.netbeans.api.java.platform.JavaPlatform;
 import org.netbeans.gradle.project.NbGradleProject;
+import org.netbeans.gradle.project.WaitableSignal;
 import org.netbeans.gradle.project.properties.GlobalGradleSettings;
 import org.netbeans.spi.java.classpath.ClassPathFactory;
 import org.netbeans.spi.java.classpath.ClassPathImplementation;
@@ -41,7 +39,7 @@ public final class GradleFilesClassPathProvider implements ClassPathProvider {
     private static final Logger LOGGER = Logger.getLogger(GradleFilesClassPathProvider.class.getName());
 
     private final AtomicBoolean initialized;
-    private final SimpleSignal initSignal;
+    private final WaitableSignal initSignal;
     private final ConcurrentMap<ClassPathType, List<PathResourceImplementation>> classpathResources;
     private final Map<ClassPathType, ClassPath> classpaths;
 
@@ -50,11 +48,13 @@ public final class GradleFilesClassPathProvider implements ClassPathProvider {
     @SuppressWarnings("MapReplaceableByEnumMap") // no, it's not.
     public GradleFilesClassPathProvider() {
         this.initialized = new AtomicBoolean(false);
-        this.initSignal = new SimpleSignal();
+        this.initSignal = new WaitableSignal();
         this.classpaths = new EnumMap<ClassPathType, ClassPath>(ClassPathType.class);
         this.classpathResources = new ConcurrentHashMap<ClassPathType, List<PathResourceImplementation>>();
 
-        this.changes = new PropertyChangeSupport(this);
+        EventSource eventSource = new EventSource();
+        this.changes = new PropertyChangeSupport(eventSource);
+        eventSource.init(this.changes);
     }
 
     public static boolean isGradleFile(FileObject file) {
@@ -226,50 +226,33 @@ public final class GradleFilesClassPathProvider implements ClassPathProvider {
         }
     }
 
-    private static class SimpleSignal {
-        private final Lock lock;
-        private final Condition signalEvent;
-        private volatile boolean signaled;
-
-        public SimpleSignal() {
-            this.lock = new ReentrantLock();
-            this.signalEvent = this.lock.newCondition();
-            this.signaled = false;
-        }
-
-        public void signal() {
-            lock.lock();
-            try {
-                signaled = true;
-                signalEvent.signalAll();
-            } finally {
-                lock.unlock();
-            }
-        }
-
-        public boolean tryWaitForSignal() {
-            if (signaled) {
-                return true;
-            }
-
-            lock.lock();
-            try {
-                while (!signaled) {
-                    signalEvent.await();
-                }
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            } finally {
-                lock.unlock();
-            }
-
-            return signaled;
-        }
-    }
-
     private enum ClassPathType {
         BOOT,
         COMPILE,
         RUNTIME
+    }
+
+    private static final class EventSource implements ClassPathImplementation {
+        private volatile PropertyChangeSupport changes;
+
+        public void init(PropertyChangeSupport changes) {
+            assert changes != null;
+            this.changes = changes;
+        }
+
+        @Override
+        public List<PathResourceImplementation> getResources() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public void addPropertyChangeListener(PropertyChangeListener listener) {
+            changes.addPropertyChangeListener(listener);
+        }
+
+        @Override
+        public void removePropertyChangeListener(PropertyChangeListener listener) {
+            changes.removePropertyChangeListener(listener);
+        }
     }
 }

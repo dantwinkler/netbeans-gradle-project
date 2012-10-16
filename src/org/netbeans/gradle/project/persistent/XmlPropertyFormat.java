@@ -25,7 +25,7 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import org.netbeans.api.java.platform.JavaPlatform;
 import org.netbeans.api.java.platform.JavaPlatformManager;
-import org.netbeans.gradle.project.properties.MemProjectProperties;
+import org.netbeans.api.java.platform.Specification;
 import org.netbeans.gradle.project.properties.PredefinedTask;
 import org.netbeans.gradle.project.properties.PropertiesSnapshot;
 import org.openide.modules.SpecificationVersion;
@@ -41,10 +41,12 @@ final class XmlPropertyFormat {
 
     private static final String ROOT_NODE = "gradle-project-properties";
     private static final String SOURCE_ENCODING_NODE = "source-encoding";
+    private static final String PLATFORM_NAME_NODE = "target-platform-name";
     private static final String PLATFORM_NODE = "target-platform";
     private static final String SOURCE_LEVEL_NODE = "source-level";
     private static final String COMMON_TASKS_NODE = "common-tasks";
     private static final String TASK_DISPLAY_NAME_NODE = "display-name";
+    private static final String TASK_NON_BLOCKING_NODE = "non-blocking";
     private static final String TASK_NODE = "task";
     private static final String TASK_NAME_LIST_NODE = "task-names";
     private static final String TASK_NAME_NODE = "name";
@@ -55,6 +57,8 @@ final class XmlPropertyFormat {
 
     private static final String VALUE_YES = "yes";
     private static final String VALUE_NO = "no";
+
+    private static final String DEFAULT_SPECIFICATION_NAME = "j2se";
 
     private static Element addChild(Node parent, String tagName) {
         Element element = parent.getOwnerDocument().createElement(tagName);
@@ -84,6 +88,7 @@ final class XmlPropertyFormat {
         Element taskNode = addChild(node, TASK_NODE);
 
         addSimpleChild(taskNode, TASK_DISPLAY_NAME_NODE, task.getDisplayName());
+        addSimpleChild(taskNode, TASK_NON_BLOCKING_NODE, task.isNonBlocking() ? VALUE_YES : VALUE_NO);
 
         Element nameListNode = addChild(taskNode, TASK_NAME_LIST_NODE);
         for (PredefinedTask.Name name: task.getTaskNames()) {
@@ -131,22 +136,15 @@ final class XmlPropertyFormat {
                 + " - Used by the Gradle plugin of NetBeans.");
         root.appendChild(comment);
 
-        JavaPlatform defaultPlatform = JavaPlatform.getDefault();
-
         String sourceEncoding = snapshot.getSourceEncoding().name();
-        if (!sourceEncoding.equals(MemProjectProperties.DEFAULT_SOURCE_ENCODING.name())) {
-            addSimpleChild(root, SOURCE_ENCODING_NODE, sourceEncoding);
-        }
+        addSimpleChild(root, SOURCE_ENCODING_NODE, sourceEncoding);
 
         JavaPlatform platform = snapshot.getPlatform();
-        if (!platform.equals(defaultPlatform)) {
-            addSimpleChild(root, PLATFORM_NODE, platform.getSpecification().getVersion().toString());
-        }
+        addSimpleChild(root, PLATFORM_NAME_NODE, platform.getSpecification().getName());
+        addSimpleChild(root, PLATFORM_NODE, platform.getSpecification().getVersion().toString());
 
         String sourceLevel = snapshot.getSourceLevel();
-        if (!sourceLevel.equals(MemProjectProperties.getSourceLevelFromPlatform(defaultPlatform))) {
-            addSimpleChild(root, SOURCE_LEVEL_NODE, sourceLevel);
-        }
+        addSimpleChild(root, SOURCE_LEVEL_NODE, sourceLevel);
 
         List<PredefinedTask> commonTasks = snapshot.getCommonTasks();
         if (!commonTasks.isEmpty()) {
@@ -186,7 +184,7 @@ final class XmlPropertyFormat {
         return null;
     }
 
-    private static JavaPlatform parsePlatform(String versionStr) {
+    private static JavaPlatform parsePlatform(String specName, String versionStr) {
         SpecificationVersion version;
         try {
             version = new SpecificationVersion(versionStr);
@@ -197,7 +195,9 @@ final class XmlPropertyFormat {
 
         JavaPlatform[] platforms = JavaPlatformManager.getDefault().getInstalledPlatforms();
         for (JavaPlatform platform: platforms) {
-            if (version.equals(platform.getSpecification().getVersion())) {
+            Specification specification = platform.getSpecification();
+            if (specName.equalsIgnoreCase(specification.getName())
+                    && version.equals(specification.getVersion())) {
                 return platform;
             }
         }
@@ -214,12 +214,25 @@ final class XmlPropertyFormat {
 
         JavaPlatform bestMatch = null;
         for (JavaPlatform platform: platforms) {
+            Specification platformSpecification = platform.getSpecification();
+            if (platformSpecification == null) {
+                continue;
+            }
+
+            if (!specName.equalsIgnoreCase(platformSpecification.getName())) {
+                continue;
+            }
+
+            SpecificationVersion thisVersion = platformSpecification.getVersion();
+            if (thisVersion == null) {
+                continue;
+            }
+
             if (bestMatch == null) {
                 bestMatch = platform;
             }
             else {
                 SpecificationVersion bestVersion = bestMatch.getSpecification().getVersion();
-                SpecificationVersion thisVersion = platform.getSpecification().getVersion();
 
                 // required version is greater than the one we currently have
                 if (version.compareTo(bestVersion) > 0) {
@@ -267,6 +280,15 @@ final class XmlPropertyFormat {
         }
         displayName = displayName != null ? displayName.trim() : "?";
 
+        Element nonBlockingNode = getFirstChildByTagName(root, TASK_NON_BLOCKING_NODE);
+        boolean nonBlocking = false;
+        if (nonBlockingNode != null) {
+            String nonBlockingStr = nonBlockingNode.getTextContent();
+            if (nonBlockingStr != null) {
+                nonBlocking = VALUE_YES.equalsIgnoreCase(nonBlockingStr.trim());
+            }
+        }
+
         List<PredefinedTask.Name> names = new LinkedList<PredefinedTask.Name>();
         Element nameListNode = getFirstChildByTagName(root, TASK_NAME_LIST_NODE);
         if (nameListNode != null) {
@@ -275,7 +297,7 @@ final class XmlPropertyFormat {
                 name = name != null ? name.trim() : "";
 
                 if (!name.isEmpty()) {
-                    boolean mustExist = VALUE_YES.equals(nameNode.getAttribute(TASK_MUST_EXIST_ATTR));
+                    boolean mustExist = VALUE_YES.equalsIgnoreCase(nameNode.getAttribute(TASK_MUST_EXIST_ATTR));
                     names.add(new PredefinedTask.Name(name, mustExist));
                 }
             }
@@ -305,7 +327,7 @@ final class XmlPropertyFormat {
             }
         }
 
-        return new PredefinedTask(displayName, names, args, jvmArgs);
+        return new PredefinedTask(displayName, names, args, jvmArgs, nonBlocking);
     }
 
     private static List<PredefinedTask> readTasks(Element root) {
@@ -362,9 +384,14 @@ final class XmlPropertyFormat {
             result.setSourceEncoding(sourceEncoding);
         }
 
+        String platformName = tryGetValueOfNode(root, PLATFORM_NAME_NODE);
+        if (platformName == null) {
+            platformName = DEFAULT_SPECIFICATION_NAME;
+        }
+
         String platformStr = tryGetValueOfNode(root, PLATFORM_NODE);
         JavaPlatform platform = platformStr != null
-                ? parsePlatform(platformStr)
+                ? parsePlatform(platformName, platformStr)
                 : null;
         if (platform != null) {
             result.setPlatform(platform);

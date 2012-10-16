@@ -30,8 +30,8 @@ public final class NbStrings {
         return NbBundle.getMessage(NbStrings.class, "LBL_LoadingProject", projectName);
     }
 
-    public static String getExecuteTasksText() {
-        return NbBundle.getMessage(NbStrings.class, "LBL_ExecutingGradleTasks");
+    public static String getExecuteTasksText(List<String> taskNames) {
+        return NbBundle.getMessage(NbStrings.class, "LBL_ExecutingGradleTasks", taskNames);
     }
 
     public static String getExecutingTaskMessage(String command) {
@@ -100,6 +100,10 @@ public final class NbStrings {
 
     public static String getReloadCommandCaption() {
         return NbBundle.getMessage(NbStrings.class, "LBL_ReloadProject");
+    }
+
+    public static String getOpenImmediateSubProjectsCaption() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_OpenImmediateSubProjects");
     }
 
     public static String getOpenSubProjectsCaption() {

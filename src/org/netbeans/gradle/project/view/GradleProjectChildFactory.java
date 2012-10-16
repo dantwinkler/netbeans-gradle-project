@@ -1,6 +1,7 @@
 package org.netbeans.gradle.project.view;
 
 import java.awt.Image;
+import java.io.File;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
@@ -16,8 +17,10 @@ import org.netbeans.gradle.project.NbIcons;
 import org.netbeans.gradle.project.NbStrings;
 import org.netbeans.gradle.project.model.NbGradleModel;
 import org.netbeans.gradle.project.model.NbGradleModule;
+import org.netbeans.gradle.project.model.NbModelUtils;
 import org.netbeans.spi.java.project.support.ui.PackageView;
 import org.openide.filesystems.FileObject;
+import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataFolder;
 import org.openide.loaders.DataObject;
 import org.openide.loaders.DataObjectNotFoundException;
@@ -155,18 +158,20 @@ extends
     }
 
     private void addChildren(List<SingleNodeFactory> toPopulate) {
-        final List<NbGradleModule> children = getShownModule().getChildren();
-        if (children.isEmpty()) {
+        NbGradleModule shownModule = getShownModule();
+        final List<NbGradleModule> immediateChildren = shownModule.getChildren();
+        if (immediateChildren.isEmpty()) {
             return;
         }
+        final List<NbGradleModule> children = NbModelUtils.getAllChildren(shownModule);
 
         toPopulate.add(new SingleNodeFactory() {
             @Override
             public Node createNode() {
                 return new FilterNode(
                         createSimpleNode(),
-                        createSubprojectsChild(children),
-                        Lookups.fixed(children.toArray())) {
+                        createSubprojectsChild(immediateChildren),
+                        Lookups.fixed(immediateChildren.toArray())) {
                     @Override
                     public String getName() {
                         return "SubProjectsNode_" + getShownModule().getUniqueName();
@@ -175,6 +180,7 @@ extends
                     @Override
                     public Action[] getActions(boolean context) {
                         return new Action[] {
+                            new OpenProjectsAction(NbStrings.getOpenImmediateSubProjectsCaption(), immediateChildren),
                             new OpenProjectsAction(NbStrings.getOpenSubProjectsCaption(), children)
                         };
                     }
@@ -212,8 +218,24 @@ extends
         addSourceGroups(sources.getSourceGroups(GradleProjectConstants.TEST_RESOURCES), toPopulate);
     }
 
+    private void addListedDirs(List<SingleNodeFactory> toPopulate) {
+        for (File listedDir: project.getCurrentModel().getMainModule().getListedDirs()) {
+            FileObject listedDirObj = FileUtil.toFileObject(listedDir);
+            if (listedDirObj != null) {
+                final DataFolder listedFolder = DataFolder.findFolder(listedDirObj);
+                toPopulate.add(new SingleNodeFactory() {
+                    @Override
+                    public Node createNode() {
+                        return listedFolder.getNodeDelegate().cloneNode();
+                    }
+                });
+            }
+        }
+    }
+
     private void readKeys(List<SingleNodeFactory> toPopulate) throws DataObjectNotFoundException {
         addSources(toPopulate);
+        addListedDirs(toPopulate);
 
         addChildren(toPopulate);
 
