@@ -1,8 +1,10 @@
 package org.netbeans.gradle.project.properties;
 
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import org.netbeans.gradle.project.CollectionUtils;
+import org.netbeans.gradle.project.NbGradleProject;
 import org.netbeans.gradle.project.model.NbGradleModule;
 import org.netbeans.gradle.project.model.NbGradleTask;
 import org.netbeans.gradle.project.model.NbModelUtils;
@@ -132,7 +134,31 @@ public final class PredefinedTask {
         }
     }
 
-    public GradleTaskDef createTaskDef(NbGradleModule mainModule) {
+    public static GradleTaskDef.Builder getDefaultTaskBuilder(
+            NbGradleProject project,
+            List<String> taskNames,
+            boolean nonBlocking) {
+        return getDefaultTaskBuilder(project.getDisplayName(), taskNames, nonBlocking);
+    }
+
+    public static GradleTaskDef.Builder getDefaultTaskBuilder(
+            String projectName,
+            List<String> taskNames,
+            boolean nonBlocking) {
+
+        String caption = projectName;
+        if (!nonBlocking) {
+            caption += " - " + taskNames.toString();
+        }
+
+        GradleTaskDef.Builder builder = new GradleTaskDef.Builder(caption, taskNames);
+        builder.setNonBlocking(nonBlocking);
+        builder.setCleanOutput(!nonBlocking);
+        builder.setReuseOutput(nonBlocking);
+        return builder;
+    }
+
+    public GradleTaskDef createTaskDef(NbGradleProject project, NbGradleModule mainModule) {
         String projectName = mainModule.getUniqueName();
         List<String> processedTaskNames = new LinkedList<String>();
         for (Name name: taskNames) {
@@ -143,10 +169,10 @@ public final class PredefinedTask {
             processedTaskNames.add(rawName);
         }
 
-        GradleTaskDef.Builder builder = new GradleTaskDef.Builder(processedTaskNames);
+        GradleTaskDef.Builder builder = getDefaultTaskBuilder(
+                project, processedTaskNames, nonBlocking);
         builder.setArguments(arguments);
         builder.setJvmArguments(jvmArguments);
-        builder.setNonBlocking(nonBlocking);
         return builder.create();
     }
 

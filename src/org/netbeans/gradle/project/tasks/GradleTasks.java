@@ -1,5 +1,6 @@
 package org.netbeans.gradle.project.tasks;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,12 +12,13 @@ import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.gradle.tooling.BuildException;
 import org.gradle.tooling.BuildLauncher;
 import org.gradle.tooling.GradleConnector;
 import org.gradle.tooling.ProgressEvent;
@@ -26,13 +28,20 @@ import org.netbeans.api.progress.ProgressHandle;
 import org.netbeans.gradle.project.NbGradleProject;
 import org.netbeans.gradle.project.NbStrings;
 import org.netbeans.gradle.project.model.GradleModelLoader;
+import org.netbeans.gradle.project.output.BuildErrorConsumer;
+import org.netbeans.gradle.project.output.FileLineConsumer;
+import org.netbeans.gradle.project.output.InputOutputManager;
+import org.netbeans.gradle.project.output.InputOutputManager.IORef;
+import org.netbeans.gradle.project.output.LineOutputWriter;
+import org.netbeans.gradle.project.output.OutputUrlConsumer;
+import org.netbeans.gradle.project.output.ProjectFileConsumer;
+import org.netbeans.gradle.project.output.SmartOutputHandler;
+import org.netbeans.gradle.project.output.StackTraceConsumer;
 import org.netbeans.gradle.project.properties.GlobalGradleSettings;
 import org.openide.LifecycleManager;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
 import org.openide.util.RequestProcessor;
-import org.openide.windows.IOProvider;
-import org.openide.windows.InputOutput;
 import org.openide.windows.OutputWriter;
 
 public final class GradleTasks {
@@ -46,17 +55,83 @@ public final class GradleTasks {
         return jdkHomeObj != null ? FileUtil.toFile(jdkHomeObj) : null;
     }
 
+    private static void printCommand(OutputWriter buildOutput, String command, GradleTaskDef taskDef) {
+        buildOutput.println(NbStrings.getExecutingTaskMessage(command));
+        if (!taskDef.getArguments().isEmpty()) {
+            buildOutput.println(NbStrings.getTaskArgumentsMessage(taskDef.getArguments()));
+        }
+        if (!taskDef.getJvmArguments().isEmpty()) {
+            buildOutput.println(NbStrings.getTaskJvmArgumentsMessage(taskDef.getJvmArguments()));
+        }
+
+        buildOutput.println();
+    }
+
+    private static void configureBuildLauncher(BuildLauncher buildLauncher, GradleTaskDef taskDef, final ProgressHandle progress) {
+        File javaHome = getJavaHome();
+        if (javaHome != null) {
+            buildLauncher.setJavaHome(javaHome);
+        }
+
+        if (!taskDef.getJvmArguments().isEmpty()) {
+            buildLauncher.setJvmArguments(taskDef.getJvmArgumentsArray());
+        }
+        if (!taskDef.getArguments().isEmpty()) {
+            buildLauncher.withArguments(taskDef.getArgumentArray());
+        }
+
+        buildLauncher.addProgressListener(new ProgressListener() {
+            @Override
+            public void statusChanged(ProgressEvent pe) {
+                progress.progress(pe.getDescription());
+            }
+        });
+
+       buildLauncher.forTasks(taskDef.getTaskNamesArray());
+    }
+
+    private static OutputRef configureOutput(
+            NbGradleProject project,
+            GradleTaskDef taskDef,
+            BuildLauncher buildLauncher,
+            OutputWriter buildOutput,
+            OutputWriter buildErrOutput) {
+
+        List<SmartOutputHandler.Consumer> consumers = new LinkedList<SmartOutputHandler.Consumer>();
+        consumers.add(new StackTraceConsumer(project));
+        consumers.add(new OutputUrlConsumer());
+        consumers.add(new ProjectFileConsumer(project));
+
+        List<SmartOutputHandler.Consumer> outputConsumers = new LinkedList<SmartOutputHandler.Consumer>();
+        outputConsumers.addAll(consumers);
+
+        List<SmartOutputHandler.Consumer> errorConsumers = new LinkedList<SmartOutputHandler.Consumer>();
+        errorConsumers.add(new BuildErrorConsumer());
+        errorConsumers.addAll(consumers);
+        errorConsumers.add(new FileLineConsumer());
+
+        Writer forwardedStdOut = new LineOutputWriter(new SmartOutputHandler(
+                buildOutput,
+                Arrays.asList(taskDef.getStdOutListener()),
+                outputConsumers));
+        Writer forwardedStdErr = new LineOutputWriter(new SmartOutputHandler(
+                buildErrOutput,
+                Arrays.asList(taskDef.getStdErrListener()),
+                errorConsumers));
+
+        buildLauncher.setStandardOutput(new WriterOutputStream(forwardedStdOut));
+        buildLauncher.setStandardError(new WriterOutputStream(forwardedStdErr));
+
+        return new OutputRef(forwardedStdOut, forwardedStdErr);
+    }
+
     private static void doGradleTasksWithProgress(
             final ProgressHandle progress,
             NbGradleProject project,
             GradleTaskDef taskDef) {
-        String printableName = taskDef.getTaskNames().size() == 1
-                ? taskDef.getTaskNames().get(0)
-                : taskDef.getTaskNames().toString();
-
         StringBuilder commandBuilder = new StringBuilder(128);
         commandBuilder.append("gradle");
-        for (String task: taskDef.getTaskNames()) {
+        for (String task : taskDef.getTaskNames()) {
             commandBuilder.append(' ');
             commandBuilder.append(task);
         }
@@ -75,68 +150,58 @@ public final class GradleTasks {
         ProjectConnection projectConnection = null;
         try {
             projectConnection = gradleConnector.connect();
+
             BuildLauncher buildLauncher = projectConnection.newBuild();
+            configureBuildLauncher(buildLauncher, taskDef, progress);
 
-            File javaHome = getJavaHome();
-            if (javaHome != null) {
-                buildLauncher.setJavaHome(javaHome);
-            }
+            IORef ioRef = InputOutputManager.getInputOutput(
+                    taskDef.getCaption(),
+                    taskDef.isReuseOutput(),
+                    taskDef.isCleanOutput());
+            try {
+                OutputWriter buildOutput = ioRef.getIo().getOut();
+                try {
+                    OutputWriter buildErrOutput = ioRef.getIo().getErr();
+                    try {
+                        if (GlobalGradleSettings.getAlwaysClearOutput().getValue()
+                                || taskDef.isCleanOutput()) {
+                            buildOutput.reset();
+                            // There is no need to reset buildErrOutput,
+                            // at least this is what NetBeans tells you in its
+                            // logs if you do.
+                        }
 
-            if (!taskDef.getJvmArguments().isEmpty()) {
-                buildLauncher.setJvmArguments(taskDef.getJvmArgumentsArray());
-            }
-            if (!taskDef.getArguments().isEmpty()) {
-                buildLauncher.withArguments(taskDef.getArgumentArray());
-            }
+                        printCommand(buildOutput, command, taskDef);
 
-            buildLauncher.addProgressListener(new ProgressListener() {
-                @Override
-                public void statusChanged(ProgressEvent pe) {
-                    progress.progress(pe.getDescription());
+                        OutputRef outputRef = configureOutput(
+                                project, taskDef, buildLauncher, buildOutput, buildErrOutput);
+                        try {
+                            ioRef.getIo().select();
+                            buildLauncher.run();
+                        } finally {
+                            // This close method will only forward the last lines
+                            // if they were not terminated with a line separator.
+                            outputRef.close();
+                        }
+                    } catch (Throwable ex) {
+                        LOGGER.log(
+                                ex instanceof Exception ? Level.INFO : Level.SEVERE,
+                                "Gradle build failure: " + command,
+                                ex);
+
+                        String buildFailureMessage = NbStrings.getBuildFailure(command);
+                        buildErrOutput.println();
+                        buildErrOutput.println(buildFailureMessage);
+                        project.displayError(buildFailureMessage, ex, false);
+                    } finally {
+                        buildErrOutput.close();
+                    }
+                } finally {
+                    buildOutput.close();
                 }
-            });
-
-           buildLauncher.forTasks(taskDef.getTaskNamesArray());
-
-           InputOutput io = IOProvider.getDefault().getIO("Gradle: " + printableName, false);
-           OutputWriter buildOutput = io.getOut();
-           try {
-               buildOutput.println(NbStrings.getExecutingTaskMessage(command));
-               if (!taskDef.getArguments().isEmpty()) {
-                   buildOutput.println(NbStrings.getTaskArgumentsMessage(taskDef.getArguments()));
-               }
-               if (!taskDef.getJvmArguments().isEmpty()) {
-                   buildOutput.println(NbStrings.getTaskJvmArgumentsMessage(taskDef.getJvmArguments()));
-               }
-
-               buildOutput.println();
-
-               OutputWriter buildErrOutput = io.getErr();
-               try {
-                   Writer forwardedStdOut = new WriterForwarded(buildOutput, taskDef.getStdOutListener());
-                   Writer forwardedStdErr = new WriterForwarded(buildOutput, taskDef.getStdErrListener());
-
-                   buildLauncher.setStandardOutput(new WriterOutputStream(forwardedStdOut));
-                   buildLauncher.setStandardError(new WriterOutputStream(forwardedStdErr));
-
-                   io.select();
-                   buildLauncher.run();
-               } catch (BuildException ex) {
-                   // Gradle should have printed this one to stderr.
-                   LOGGER.log(Level.INFO, "Gradle build failure: " + command, ex);
-               } catch (Throwable ex) {
-                   buildErrOutput.println();
-                   ex.printStackTrace(buildErrOutput);
-                   LOGGER.log(
-                           ex instanceof Exception ? Level.INFO : Level.SEVERE,
-                           "Gradle build failure: " + command,
-                           ex);
-               } finally {
-                   buildErrOutput.close();
-               }
-           } finally {
-               buildOutput.close();
-           }
+            } finally {
+                ioRef.close();
+            }
         } finally {
             if (projectConnection != null) {
                 projectConnection.close();
@@ -401,77 +466,21 @@ public final class GradleTasks {
         }
     }
 
-    private static class WriterForwarded extends Writer {
-        private final Writer wrapped;
-        private final TaskOutputListener listener;
+    private static class OutputRef implements Closeable {
+        private final Writer[] writers;
 
-        public WriterForwarded(Writer wrapped, TaskOutputListener listener) {
-            if (wrapped == null) throw new NullPointerException("wrapped");
-            if (listener == null) throw new NullPointerException("listener");
-
-            this.wrapped = wrapped;
-            this.listener = listener;
-        }
-
-        @Override
-        public void write(int c) throws IOException {
-            wrapped.write(c);
-        }
-
-        @Override
-        public void write(char[] cbuf) throws IOException {
-            listener.receiveOutput(cbuf, 0, cbuf.length);
-            wrapped.write(cbuf);
-        }
-
-        @Override
-        public void write(char[] cbuf, int off, int len) throws IOException {
-            listener.receiveOutput(cbuf, off, len);
-            wrapped.write(cbuf, off, len);
-        }
-
-        @Override
-        public void write(String str) throws IOException {
-            char[] cbuf = str.toCharArray();
-            listener.receiveOutput(cbuf, 0, cbuf.length);
-            wrapped.write(str);
-        }
-
-        @Override
-        public void write(String str, int off, int len) throws IOException {
-            char[] cbuf = str.toCharArray();
-            listener.receiveOutput(cbuf, off, len);
-            wrapped.write(str, off, len);
-        }
-
-        @Override
-        public Writer append(CharSequence csq) throws IOException {
-            char[] cbuf = csq.toString().toCharArray();
-            listener.receiveOutput(cbuf, 0, cbuf.length);
-            return wrapped.append(csq);
-        }
-
-        @Override
-        public Writer append(CharSequence csq, int start, int end) throws IOException {
-            char[] cbuf = csq.toString().toCharArray();
-            listener.receiveOutput(cbuf, start, end - start);
-            return wrapped.append(csq, start, end);
-        }
-
-        @Override
-        public Writer append(char c) throws IOException {
-            listener.receiveOutput(new char[]{c}, 0, 1);
-            return wrapped.append(c);
-        }
-
-        @Override
-        public void flush() throws IOException {
-            wrapped.flush();
+        public OutputRef(Writer... writers) {
+            this.writers = writers.clone();
+            for (Writer writer: this.writers) {
+                if (writer == null) throw new NullPointerException("writer");
+            }
         }
 
         @Override
         public void close() throws IOException {
-            wrapped.close();
+            for (Writer writer: writers) {
+                writer.close();
+            }
         }
     }
 

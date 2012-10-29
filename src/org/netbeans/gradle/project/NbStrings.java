@@ -78,6 +78,10 @@ public final class NbStrings {
         return NbBundle.getMessage(NbStrings.class, "LBL_Build");
     }
 
+    public static String getTestCommandCaption() {
+        return NbBundle.getMessage(NbStrings.class, "LBL_Test");
+    }
+
     public static String getCleanCommandCaption() {
         return NbBundle.getMessage(NbStrings.class, "LBL_Clean");
     }
@@ -177,6 +181,22 @@ public final class NbStrings {
 
     public static String getSelectProjectLocationCaption() {
         return NbBundle.getMessage(NbStrings.class, "LBL_SelectProjectLocation");
+    }
+
+    public static String getParsingModel() {
+        return NbBundle.getMessage(NbStrings.class, "MSG_ParsingModel");
+    }
+
+    public static String getProjectErrorTitle(String projectName) {
+        return NbBundle.getMessage(NbStrings.class, "LBL_PROJECT_ERROR_TITLE", projectName);
+    }
+
+    public static String getProjectLoadFailure(String projectName) {
+        return NbBundle.getMessage(NbStrings.class, "MSG_PROJECT_LOAD_FAILURE", projectName);
+    }
+
+    public static String getBuildFailure(String tasks) {
+        return NbBundle.getMessage(NbStrings.class, "MSG_BUILD_FAILURE", tasks);
     }
 
     private NbStrings() {

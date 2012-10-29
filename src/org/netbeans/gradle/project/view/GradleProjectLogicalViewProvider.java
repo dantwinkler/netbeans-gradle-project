@@ -14,7 +14,6 @@ import java.util.EnumMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.JButton;
@@ -52,12 +51,11 @@ import org.openide.nodes.NodeAdapter;
 import org.openide.nodes.NodeEvent;
 import org.openide.util.ImageUtilities;
 import org.openide.util.Lookup;
+import org.openide.util.Utilities;
 import org.openide.util.actions.Presenter;
 import org.openide.util.lookup.ProxyLookup;
 
 public final class GradleProjectLogicalViewProvider implements LogicalViewProvider {
-    private static final Logger LOGGER = Logger.getLogger(GradleProjectLogicalViewProvider.class.getName());
-
     private final NbGradleProject project;
 
     public GradleProjectLogicalViewProvider(NbGradleProject project) {
@@ -110,38 +108,45 @@ public final class GradleProjectLogicalViewProvider implements LogicalViewProvid
 
             TasksActionMenu tasksAction = new TasksActionMenu(project);
             CustomTasksActionMenu customTasksAction = new CustomTasksActionMenu(project);
-            this.actions = new Action[] {
-                CommonProjectActions.newFileAction(),
-                null,
-                createProjectAction(
+
+            List<Action> projectActions = new LinkedList<Action>();
+            projectActions.add(CommonProjectActions.newFileAction());
+            projectActions.add(null);
+            projectActions.add(createProjectAction(
                     ActionProvider.COMMAND_RUN,
-                    NbStrings.getRunCommandCaption()),
-                createProjectAction(
+                    NbStrings.getRunCommandCaption()));
+            projectActions.add(createProjectAction(
                     ActionProvider.COMMAND_DEBUG,
-                    NbStrings.getDebugCommandCaption()),
-                null,
-                createProjectAction(
+                    NbStrings.getDebugCommandCaption()));
+            projectActions.add(null);
+            projectActions.add(createProjectAction(
                     ActionProvider.COMMAND_BUILD,
-                    NbStrings.getBuildCommandCaption()),
-                createProjectAction(
+                    NbStrings.getBuildCommandCaption()));
+            projectActions.add(createProjectAction(
+                    ActionProvider.COMMAND_TEST,
+                    NbStrings.getTestCommandCaption()));
+            projectActions.add(createProjectAction(
                     ActionProvider.COMMAND_CLEAN,
-                    NbStrings.getCleanCommandCaption()),
-                createProjectAction(
+                    NbStrings.getCleanCommandCaption()));
+            projectActions.add(createProjectAction(
                     ActionProvider.COMMAND_REBUILD,
-                    NbStrings.getRebuildCommandCaption()),
-                createProjectAction(
+                    NbStrings.getRebuildCommandCaption()));
+            projectActions.add(createProjectAction(
                     GradleActionProvider.COMMAND_JAVADOC,
-                    NbStrings.getJavadocCommandCaption()),
-                customTasksAction,
-                tasksAction,
-                null,
-                createProjectAction(
+                    NbStrings.getJavadocCommandCaption()));
+            projectActions.add(customTasksAction);
+            projectActions.add(tasksAction);
+            projectActions.add(null);
+            projectActions.add(createProjectAction(
                     GradleActionProvider.COMMAND_RELOAD,
-                    NbStrings.getReloadCommandCaption()),
-                CommonProjectActions.closeProjectAction(),
-                null,
-                CommonProjectActions.customizeProjectAction()
-            };
+                    NbStrings.getReloadCommandCaption()));
+            projectActions.add(CommonProjectActions.closeProjectAction());
+            projectActions.add(null);
+            projectActions.addAll(Utilities.actionsForPath("Projects/Actions"));
+            projectActions.add(null);
+            projectActions.add(CommonProjectActions.customizeProjectAction());
+
+            this.actions = projectActions.toArray(new Action[projectActions.size()]);
         }
 
         public void fireInfoChangeEvent() {
@@ -281,7 +286,7 @@ public final class GradleProjectLogicalViewProvider implements LogicalViewProvid
             }
 
             PredefinedTask newTaskDef = createTaskDef(actionPanel, displayName, true);
-            if (newTaskDef.createTaskDef(project.getAvailableModel().getMainModule()) == null) {
+            if (newTaskDef.createTaskDef(project, project.getAvailableModel().getMainModule()) == null) {
                 newTaskDef = createTaskDef(actionPanel, displayName, false);
             }
 
@@ -332,7 +337,8 @@ public final class GradleProjectLogicalViewProvider implements LogicalViewProvid
             if (doExecute) {
                 String[] tasks = panel.getTasks();
                 if (tasks.length > 0) {
-                    GradleTaskDef.Builder builder = new GradleTaskDef.Builder(tasks);
+                    GradleTaskDef.Builder builder = PredefinedTask.getDefaultTaskBuilder(
+                            project, Arrays.asList(tasks), panel.isNonBlocking());
                     builder.setArguments(Arrays.asList(panel.getArguments()));
                     builder.setJvmArguments(Arrays.asList(panel.getJvmArguments()));
 
@@ -427,7 +433,7 @@ public final class GradleProjectLogicalViewProvider implements LogicalViewProvid
             boolean hasCustomTasks = false;
             menu.removeAll();
             for (final PredefinedTask task: commonTasks) {
-                if (task.createTaskDef(mainModule) == null) {
+                if (task.createTaskDef(project, mainModule) == null) {
                     continue;
                 }
 
@@ -439,7 +445,7 @@ public final class GradleProjectLogicalViewProvider implements LogicalViewProvid
                         // the project might have changed since the menu item
                         // was created.
                         NbGradleModule module = project.getAvailableModel().getMainModule();
-                        GradleTaskDef taskDef = task.createTaskDef(module);
+                        GradleTaskDef taskDef = task.createTaskDef(project, module);
                         if (taskDef != null) {
                             GradleTasks.createAsyncGradleTask(project, taskDef).run();
                         }
@@ -529,7 +535,8 @@ public final class GradleProjectLogicalViewProvider implements LogicalViewProvid
                 menuItem.addActionListener(new ActionListener() {
                     @Override
                     public void actionPerformed(ActionEvent e) {
-                        GradleTaskDef.Builder builder = new GradleTaskDef.Builder(task.getQualifiedName());
+                        GradleTaskDef.Builder builder = PredefinedTask.getDefaultTaskBuilder(
+                                project, Arrays.asList(task.getQualifiedName()), false);
                         GradleTasks.createAsyncGradleTask(project, builder.create()).run();
                     }
                 });

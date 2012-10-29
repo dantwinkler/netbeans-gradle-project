@@ -6,10 +6,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import org.netbeans.gradle.project.CollectionUtils;
 
 public final class NbGradleModule {
     private final Properties properties;
@@ -18,12 +16,13 @@ public final class NbGradleModule {
     private final List<NbGradleModule> children;
     private final List<File> listedDirs;
 
-    public NbGradleModule(
+    // Should only be called by NbGradleModuleBuilder
+    NbGradleModule(
             Properties properties,
             Map<NbSourceType, NbSourceGroup> sources,
             List<File> listedDirs,
             Map<NbDependencyType, NbDependencyGroup> dependencies,
-            Collection<NbGradleModule> children) {
+            List<NbGradleModule> children) {
 
         if (properties == null) throw new NullPointerException("properties");
         if (dependencies == null) throw new NullPointerException("dependencies");
@@ -31,25 +30,10 @@ public final class NbGradleModule {
         if (children == null) throw new NullPointerException("children");
 
         this.properties = properties;
-        this.sources = asImmutable(NbSourceType.class, sources);
-        this.listedDirs = CollectionUtils.copyNullSafeList(listedDirs);
-        this.dependencies = asImmutable(NbDependencyType.class, dependencies);
-        this.children = CollectionUtils.copyNullSafeList(children);
-    }
-
-    private static <K extends Enum<K>, V> Map<K, V> asImmutable(
-            Class<K> keyType,
-            Map<K, V> map) {
-
-        Map<K, V> clonedMap = new EnumMap<K, V>(keyType);
-        clonedMap.putAll(map);
-
-        for (Map.Entry<K, V> entry: clonedMap.entrySet()) {
-            if (entry.getKey() == null) throw new NullPointerException("entry.key");
-            if (entry.getValue() == null) throw new NullPointerException("entry.value for " + entry.getKey());
-        }
-
-        return Collections.unmodifiableMap(clonedMap);
+        this.sources = Collections.unmodifiableMap(sources);
+        this.listedDirs = Collections.unmodifiableList(listedDirs);
+        this.dependencies = Collections.unmodifiableMap(dependencies);
+        this.children = Collections.unmodifiableList(children);
     }
 
     public Properties getProperties() {
